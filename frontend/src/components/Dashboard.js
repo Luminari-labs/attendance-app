@@ -9,7 +9,7 @@ import {
   Message, LoadingText, HistorySection, Table, TableHeader, TableCell
 } from './DashboardStyles';
 
-const API_URL = process.env.REACT_APP_API_URL || '';
+const API_URL = '';
 
 const Dashboard = () => {
   const [scanning, setScanning] = useState(false);

@@ -22,7 +22,9 @@ const Login = () => {
         navigate('/dashboard');
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed');
+      const serverError = err.response?.data?.error;
+      const networkError = err.message;
+      setError(serverError || networkError || 'Login failed');
     } finally {
       setLoading(false);
     }
