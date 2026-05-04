@@ -1,10 +1,19 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
 const { DB_PATH } = require('./config');
 
-const db = new sqlite3.Database(path.resolve(__dirname, DB_PATH), (err) => {
+const dbPath = path.resolve(__dirname, DB_PATH);
+const dbDir = path.dirname(dbPath);
+
+// Ensure data directory exists with proper permissions
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true, mode: 0o777 });
+}
+
+const db = new sqlite3.Database(dbPath, (err) => {
   if (err) console.error('DB Error:', err);
-  else console.log('Connected to SQLite');
+  else console.log('Connected to SQLite at', dbPath);
 });
 
 db.serialize(() => {

@@ -11,6 +11,9 @@ RUN npm run build
 FROM node:18-alpine
 WORKDIR /app
 
+# Create data directory for SQLite
+RUN mkdir -p /app/data && chmod 777 /app/data
+
 # Copy backend code to backend subdirectory
 COPY backend/ ./backend/
 
