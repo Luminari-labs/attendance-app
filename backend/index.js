@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { randomUUID } = require('crypto');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 const db = require('./database');
 const config = require('./config');
 const { generateQRToken, verifyQRToken } = require('./qr');
@@ -18,6 +19,10 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// Serve frontend static files
+const frontendBuildPath = process.env.FRONTEND_BUILD_PATH || path.join(__dirname, '../frontend/build');
+app.use(express.static(frontendBuildPath));
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -134,6 +139,11 @@ app.get('/api/admin/users', authenticateToken, (req, res) => {
     if (err) return res.status(500).json({ error: 'DB error' });
     res.json(rows);
   });
+});
+
+// Serve React SPA for all non-API routes
+app.get(/(.*)/, (req, res) => {
+  res.sendFile(path.join(frontendBuildPath, 'index.html'));
 });
 
 if (require.main === module) {

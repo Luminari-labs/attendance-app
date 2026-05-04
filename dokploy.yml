@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - JWT_SECRET=${JWT_SECRET}
+      - QR_SECRET=${QR_SECRET}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - OFFICE_LAT=${OFFICE_LAT:-19.4326}
+      - OFFICE_LNG=${OFFICE_LNG:--99.1332}
+      - OFFICE_RADIUS_METERS=${OFFICE_RADIUS_METERS:-100}
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

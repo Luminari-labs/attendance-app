@@ -10,7 +10,33 @@ Sistema seguro de control de asistencia que usa códigos QR dinámicos y validac
 - **Uso Único**: Cada QR solo puede usarse una vez
 - **Auditoría**: Registro completo de todas las marcas de asistencia
 
-## Instalación Rápida
+## Despliegue con Dokploy
+
+Este proyecto está configurado para desplegarse como un **servicio único** desde un solo repositorio usando Dokploy.
+
+### Pasos para despliegue:
+
+1. **Conecta tu repositorio** a Dokploy
+2. **Configura las variables de entorno** en Dokploy:
+   ```
+   NODE_ENV=production
+   PORT=3001
+   JWT_SECRET=tu_clave_secreta_jwt_muy_segura
+   QR_SECRET=tu_clave_secreta_qr_muy_segura
+   OFFICE_LAT=19.4326
+   OFFICE_LNG=-99.1332
+   OFFICE_RADIUS_METERS=100
+   ```
+3. **Dokploy detectará automáticamente** el `Dockerfile` en la raíz
+4. **El backend sirve automáticamente el frontend** - No necesitas servicios separados
+
+### Arquitectura de Despliegue
+
+```
+Usuario → Dokploy (Puerto 3001) → Backend (API) + Frontend (React build)
+```
+
+## Instalación Local
 
 ```bash
 # Ejecutar script de configuración
@@ -19,21 +45,13 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-## Inicio Manual
+### Inicio Local
 
-### Backend (API)
 ```bash
 cd /root/attendance-app/backend
 npm start
 ```
-Servidor API: http://localhost:3001
-
-### Frontend (PWA)
-```bash
-cd /root/attendance-app/frontend
-npm start
-```
-Aplicación: http://localhost:3000
+Aplicación completa: http://localhost:3001
 
 ## Credenciales por Defecto
 
@@ -62,24 +80,30 @@ QR_VALIDITY_MINUTES=5
 OFFICE_LAT=19.4326
 OFFICE_LNG=-99.1332
 OFFICE_RADIUS_METERS=100
+DB_PATH=../data/attendance.db
 ```
 
 ## Estructura del Proyecto
 
 ```
 attendance-app/
+├── Dockerfile          # Configuración para Dokploy
+├── .dockerignore       # Archivos excluidos del build
+├── dokploy.yml         # Configuración opcional de Dokploy
 ├── backend/           # API Node.js + Express
-│   ├── index.js      # Servidor principal
+│   ├── index.js      # Servidor principal (sirve frontend y API)
 │   ├── database.js   # Configuración SQLite
 │   ├── qr.js         # Generación/validación QR
 │   ├── geofence.js   # Validación de ubicación
-│   └── .env          # Configuración
+│   ├── config.js     # Configuración centralizada
+│   └── .env          # Variables de entorno
 ├── frontend/         # React PWA
+│   ├── build/       # Archivos estáticos (generados)
 │   ├── src/
 │   │   ├── components/  # Login, Dashboard, Admin
 │   │   └── context/     # Autenticación
 │   └── public/
-└── setup.sh          # Script de configuración
+└── data/             # Base de datos SQLite (persistente)
 ```
 
 ## Prevención de Fraudes
@@ -92,7 +116,8 @@ attendance-app/
 
 ## Notas para Producción
 
-1. Cambia los secretos JWT_SECRET y QR_SECRET en `.env`
-2. Usa HTTPS en producción
-3. Considera usar PostgreSQL en lugar de SQLite para más de 50 usuarios
-4. Configura un proxy inverso (nginx) para servir frontend y backend
+1. **Cambia los secretos** JWT_SECRET y QR_SECRET antes del despliegue
+2. **Usa HTTPS** - Dokploy proporciona SSL automático
+3. **Persistencia de datos**: Configura un volumen en Dokploy para `/app/data`
+4. **Base de datos**: Para más de 50 usuarios, considera migrar a PostgreSQL
+5. **Monitoreo**: Revisa los logs en el dashboard de Dokploy
