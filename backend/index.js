@@ -11,6 +11,7 @@ const { generateQRToken, verifyQRToken } = require('./qr');
 const { checkGeofence } = require('./geofence');
 
 const app = express();
+app.set('trust proxy', 1);
 const now = () => new Date().toISOString();
 const getClientIp = (req) => req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
 const maskEmail = (email = '') => {

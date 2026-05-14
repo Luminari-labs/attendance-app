@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
+import QRCode from 'qrcode';
 import {
   Container, Header, Title, LogoutButton, Card, CardTitle,
   Button, QRContainer, QRToken, QRImage, Section, RefreshButton,
@@ -14,6 +15,7 @@ const AdminDashboard = () => {
   const [users, setUsers] = useState([]);
   const [attendance, setAttendance] = useState([]);
   const [qrToken, setQrToken] = useState('');
+  const [qrImageData, setQrImageData] = useState('');
   const [qrExpiry, setQrExpiry] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [showQR, setShowQR] = useState(false);
@@ -56,7 +58,10 @@ const AdminDashboard = () => {
       const res = await axios.get(`${API_URL}/api/qr/current`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setQrToken(res.data.token);
+      const nextToken = res.data.token;
+      const qrDataUrl = await QRCode.toDataURL(nextToken, { width: 220, margin: 1 });
+      setQrToken(nextToken);
+      setQrImageData(qrDataUrl);
       setQrExpiry(new Date(res.data.expires_at));
       setShowQR(true);
     } catch (err) {
@@ -87,7 +92,7 @@ const AdminDashboard = () => {
           <QRContainer>
             <div>QR Token (expires at {qrExpiry?.toLocaleTimeString()}):</div>
             <QRToken>{qrToken}</QRToken>
-            <QRImage src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrToken)}`} alt="QR Code" />
+            <QRImage src={qrImageData} alt="QR Code" />
           </QRContainer>
         )}
       </Card>
