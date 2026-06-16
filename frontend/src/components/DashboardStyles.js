@@ -71,7 +71,16 @@ export const Button = styled.button`
 
 export const ReaderContainer = styled.div`
   width: 100%;
+  min-height: 250px;
   margin-top: 10px;
+  background: #000;
+  border-radius: 4px;
+  overflow: hidden;
+
+  video {
+    width: 100%;
+    height: auto;
+  }
 `;
 
 export const Message = styled.div`

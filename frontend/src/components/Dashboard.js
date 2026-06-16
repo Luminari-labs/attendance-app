@@ -33,36 +33,49 @@ const Dashboard = () => {
   useEffect(() => {
     if (!scanning) return;
     let stopped = false;
-    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
     let scanner;
-    try {
-      scanner = new Html5Qrcode("reader");
-      scannerRef.current = scanner;
-    } catch (err) {
-      console.error('Scanner creation error:', err);
-      setMessage('Error al iniciar la cámara: ' + err.message);
-      setScanning(false);
-      return;
-    }
-    scanner.start(
-      { facingMode: "environment" },
-      config,
-      (decodedText) => onScanSuccessRef.current(decodedText),
-      (error) => onScanErrorRef.current(error)
-    ).catch(err => {
-      if (stopped) return;
-      console.error('Scanner start error:', err);
-      setMessage('Error al iniciar la cámara: ' + (
-        String(err).includes('NotAllowed')
-          ? 'Permiso de cámara denegado. Usa HTTPS o localhost.'
-          : err.message || err
-      ));
-      setScanning(false);
-    });
+
+    const startScanner = async () => {
+      const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+      const onSuccess = (text) => onScanSuccessRef.current(text);
+      const onError = (err) => onScanErrorRef.current(err);
+
+      try {
+        scanner = new Html5Qrcode("reader");
+        scannerRef.current = scanner;
+
+        const facingModes = ["environment", "user"];
+        for (const facingMode of facingModes) {
+          if (stopped) return;
+          try {
+            await scanner.start({ facingMode }, config, onSuccess, onError);
+            return;
+          } catch (err) {
+            if (facingMode === facingModes[facingModes.length - 1]) throw err;
+            console.warn(`Camera "${facingMode}" not available, trying next:`, err);
+          }
+        }
+      } catch (err) {
+        if (stopped) return;
+        console.error('Camera error:', err);
+        const msg = String(err);
+        if (msg.includes('NotAllowed') || msg.includes('Permission')) {
+          setMessage('Permiso de cámara denegado. Asegúrate de usar HTTPS o localhost y conceder permiso.');
+        } else if (msg.includes('NotFoundError')) {
+          setMessage('No se encontró ninguna cámara en este dispositivo.');
+        } else {
+          setMessage('Error al iniciar la cámara: ' + (err.message || err));
+        }
+        setScanning(false);
+      }
+    };
+
+    startScanner();
+
     return () => {
       stopped = true;
-      if (scannerRef.current === scanner) {
-        scanner.stop().then(() => scanner.clear()).catch(() => {});
+      if (scannerRef.current) {
+        scannerRef.current.stop().then(() => scannerRef.current.clear()).catch(() => {});
       }
     };
   }, [scanning]);
