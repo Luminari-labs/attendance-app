@@ -34,8 +34,16 @@ const Dashboard = () => {
     if (!scanning) return;
     let stopped = false;
     const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-    const scanner = new Html5Qrcode("reader");
-    scannerRef.current = scanner;
+    let scanner;
+    try {
+      scanner = new Html5Qrcode("reader");
+      scannerRef.current = scanner;
+    } catch (err) {
+      console.error('Scanner creation error:', err);
+      setMessage('Error al iniciar la cámara: ' + err.message);
+      setScanning(false);
+      return;
+    }
     scanner.start(
       { facingMode: "environment" },
       config,
