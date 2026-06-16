@@ -21,9 +21,43 @@ const Dashboard = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  const onScanSuccessRef = useRef(null);
+  const onScanErrorRef = useRef(null);
+  const attendanceTypeRef = useRef(attendanceType);
+  attendanceTypeRef.current = attendanceType;
+
   useEffect(() => {
     loadHistory();
   }, []);
+
+  useEffect(() => {
+    if (!scanning) return;
+    let stopped = false;
+    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+    const scanner = new Html5Qrcode("reader");
+    scannerRef.current = scanner;
+    scanner.start(
+      { facingMode: "environment" },
+      config,
+      (decodedText) => onScanSuccessRef.current(decodedText),
+      (error) => onScanErrorRef.current(error)
+    ).catch(err => {
+      if (stopped) return;
+      console.error('Scanner start error:', err);
+      setMessage('Error al iniciar la cámara: ' + (
+        String(err).includes('NotAllowed')
+          ? 'Permiso de cámara denegado. Usa HTTPS o localhost.'
+          : err.message || err
+      ));
+      setScanning(false);
+    });
+    return () => {
+      stopped = true;
+      if (scannerRef.current === scanner) {
+        scanner.stop().then(() => scanner.clear()).catch(() => {});
+      }
+    };
+  }, [scanning]);
 
   const loadHistory = async () => {
     try {
@@ -39,26 +73,15 @@ const Dashboard = () => {
 
   const startScanning = () => {
     setScanning(true);
-    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-    scannerRef.current = new Html5Qrcode("reader");
-    scannerRef.current.start(
-      { facingMode: "environment" },
-      config,
-      onScanSuccess,
-      onScanError
-    ).catch(err => {
-      console.error('Scanner start error:', err);
-      setMessage('Failed to start scanner: ' + err.message);
-    });
   };
 
   const stopScanning = () => {
     if (scannerRef.current) {
       scannerRef.current.stop().then(() => {
         scannerRef.current.clear();
-        setScanning(false);
-      }).catch(err => console.error('Scanner stop error:', err));
+      }).catch(() => {});
     }
+    setScanning(false);
   };
 
   const onScanSuccess = async (decodedText) => {
@@ -68,10 +91,10 @@ const Dashboard = () => {
       const token = localStorage.getItem('token');
       const res = await axios.post(
         `${API_URL}/api/attendance/mark`,
-        { qr_token: decodedText, type: attendanceType },
+        { qr_token: decodedText, type: attendanceTypeRef.current },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setMessage(`Success! ${attendanceType} marked at ${new Date().toLocaleTimeString()}`);
+      setMessage(`Success! ${attendanceTypeRef.current} marked at ${new Date().toLocaleTimeString()}`);
       loadHistory();
     } catch (err) {
       setMessage('Error: ' + (err.response?.data?.error || err.message));
@@ -83,6 +106,9 @@ const Dashboard = () => {
   const onScanError = (error) => {
     console.debug('QR scan error:', error);
   };
+
+  onScanSuccessRef.current = onScanSuccess;
+  onScanErrorRef.current = onScanError;
 
   const handleLogout = () => {
     logout();
