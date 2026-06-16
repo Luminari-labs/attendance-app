@@ -74,12 +74,6 @@ export const ReaderContainer = styled.div`
   margin-top: 10px;
 `;
 
-export const LocationText = styled.div`
-  margin-top: 10px;
-  font-size: 12px;
-  color: #666;
-`;
-
 export const Message = styled.div`
   margin-top: 10px;
   color: ${props => props.$success ? 'green' : 'red'};

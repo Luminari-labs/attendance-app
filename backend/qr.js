@@ -10,8 +10,8 @@ const generateQRToken = () => {
   return jwt.sign(payload, config.QR_SECRET, { expiresIn: `${config.QR_VALIDITY_MINUTES}m` });
 };
 
-const verifyQRToken = (token, callback) => {
-  jwt.verify(token, config.QR_SECRET, callback);
+const verifyQRToken = (token) => {
+  return jwt.verify(token, config.QR_SECRET);
 };
 
 module.exports = { generateQRToken, verifyQRToken };

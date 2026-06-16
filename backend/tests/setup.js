@@ -10,12 +10,13 @@ process.env.JWT_SECRET = 'test_jwt_secret';
 process.env.QR_SECRET = 'test_qr_secret';
 
 const app = require('../index');
+const db = require('../database');
 
-afterAll((done) => {
+afterAll(() => {
+  db.close();
   if (fs.existsSync(DB_PATH)) {
     fs.unlinkSync(DB_PATH);
   }
-  done();
 });
 
 module.exports = { request, app, bcrypt, jwt };

@@ -5,7 +5,7 @@ import { Html5Qrcode } from 'html5-qrcode';
 import axios from 'axios';
 import {
   Container, Header, Title, LogoutButton, Card, CardTitle,
-  RadioGroup, RadioLabel, Button, ReaderContainer, LocationText,
+  RadioGroup, RadioLabel, Button, ReaderContainer,
   Message, LoadingText, HistorySection, Table, TableHeader, TableCell
 } from './DashboardStyles';
 
@@ -13,8 +13,6 @@ const API_URL = '';
 
 const Dashboard = () => {
   const [scanning, setScanning] = useState(false);
-  const [location, setLocation] = useState(null);
-  const [locationError, setLocationError] = useState('');
   const [attendanceType, setAttendanceType] = useState('entry');
   const [message, setMessage] = useState('');
   const [history, setHistory] = useState([]);
@@ -39,28 +37,8 @@ const Dashboard = () => {
     }
   };
 
-  const getLocation = () => {
-    if (!navigator.geolocation) {
-      setLocationError('Geolocation not supported');
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude
-        });
-        setLocationError('');
-      },
-      (error) => {
-        setLocationError('Unable to get location: ' + error.message);
-      }
-    );
-  };
-
   const startScanning = () => {
     setScanning(true);
-    getLocation();
     const config = { fps: 10, qrbox: { width: 250, height: 250 } };
     scannerRef.current = new Html5Qrcode("reader");
     scannerRef.current.start(
@@ -85,21 +63,12 @@ const Dashboard = () => {
 
   const onScanSuccess = async (decodedText) => {
     stopScanning();
-    if (!location) {
-      setMessage('Location not available. Please enable GPS and try again.');
-      return;
-    }
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
       const res = await axios.post(
         `${API_URL}/api/attendance/mark`,
-        {
-          qr_token: decodedText,
-          latitude: location.latitude,
-          longitude: location.longitude,
-          type: attendanceType
-        },
+        { qr_token: decodedText, type: attendanceType },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setMessage(`Success! ${attendanceType} marked at ${new Date().toLocaleTimeString()}`);
@@ -149,12 +118,6 @@ const Dashboard = () => {
           </div>
         )}
 
-        {location && (
-          <LocationText>
-            Location: {location.latitude.toFixed(6)}, {location.longitude.toFixed(6)}
-          </LocationText>
-        )}
-        {locationError && <Message>{locationError}</Message>}
         {message && <Message $success={message.includes('Success')}>{message}</Message>}
         {loading && <LoadingText>Processing...</LoadingText>}
       </Card>

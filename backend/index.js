@@ -8,7 +8,6 @@ const path = require('path');
 const db = require('./database');
 const config = require('./config');
 const { generateQRToken, verifyQRToken } = require('./qr');
-const { checkGeofence } = require('./geofence');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -45,7 +44,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve frontend static files
 const frontendBuildPath = process.env.FRONTEND_BUILD_PATH || path.join(__dirname, '../frontend/build');
 app.use(express.static(frontendBuildPath));
 
@@ -89,30 +87,23 @@ app.post('/api/auth/register', authLimiter, async (req, res) => {
   if (!validatePassword(password)) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   const password_hash = await bcrypt.hash(password, 10);
   const id = randomUUID();
-  db.run(
-    'INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)',
-    [id, name, email, password_hash, role || 'employee'],
-    (err) => {
-      if (err) {
-        logWarn('Register failed', { email: maskEmail(email), ip: getClientIp(req), error: err.message });
-        return res.status(400).json({ error: 'Email already exists' });
-      }
-      const token = jwt.sign({ id, email, role: role || 'employee' }, config.JWT_SECRET);
-      logInfo('Register success', { email: maskEmail(email), role: role || 'employee', ip: getClientIp(req) });
-      res.json({ token, user: { id, name, email, role: role || 'employee' } });
-    }
-  );
+  try {
+    db.prepare('INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)').run(id, name, email, password_hash, role || 'employee');
+    const token = jwt.sign({ id, email, role: role || 'employee' }, config.JWT_SECRET);
+    logInfo('Register success', { email: maskEmail(email), role: role || 'employee', ip: getClientIp(req) });
+    res.json({ token, user: { id, name, email, role: role || 'employee' } });
+  } catch (err) {
+    logWarn('Register failed', { email: maskEmail(email), ip: getClientIp(req), error: err.message });
+    res.status(400).json({ error: 'Email already exists' });
+  }
 });
 
-app.post('/api/auth/login', authLimiter, (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!validateEmail(email)) return res.status(400).json({ error: 'Invalid email format' });
   if (!password) return res.status(400).json({ error: 'Password required' });
-  db.get('SELECT * FROM users WHERE email = ?', [email], async (err, user) => {
-    if (err) {
-      logError('Login DB error', { email: maskEmail(email), ip: getClientIp(req), error: err.message });
-      return res.status(500).json({ error: 'DB error' });
-    }
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
     if (!user) {
       logWarn('Login failed: user not found', { email: maskEmail(email), ip: getClientIp(req) });
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -125,95 +116,87 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
     const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, config.JWT_SECRET);
     logInfo('Login success', { userId: user.id, email: maskEmail(user.email), role: user.role, ip: getClientIp(req) });
     res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
-  });
+  } catch (err) {
+    logError('Login DB error', { email: maskEmail(email), ip: getClientIp(req), error: err.message });
+    res.status(500).json({ error: 'DB error' });
+  }
 });
 
 app.get('/api/qr/current', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
   const token = generateQRToken();
   const expiresAt = new Date(Date.now() + config.QR_VALIDITY_MINUTES * 60000).toISOString();
-  db.run('INSERT OR REPLACE INTO qr_tokens (token, expires_at) VALUES (?, ?)', [token, expiresAt], (err) => {
-    if (err) {
-      logError('QR generation DB error', { userId: req.user.id, error: err.message });
-      return res.status(500).json({ error: 'DB error' });
-    }
+  try {
+    db.prepare('INSERT OR REPLACE INTO qr_tokens (token, expires_at) VALUES (?, ?)').run(token, expiresAt);
     res.json({ token, expires_at: expiresAt });
-  });
+  } catch (err) {
+    logError('QR generation DB error', { userId: req.user.id, error: err.message });
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+const markAttendance = db.transaction((userId, qrToken, type) => {
+  const qrRow = db.prepare('SELECT * FROM qr_tokens WHERE token = ? AND used = 0 AND expires_at > ?').get(qrToken, new Date().toISOString());
+  if (!qrRow) return { error: 'Invalid or expired QR' };
+  db.prepare('UPDATE qr_tokens SET used = 1 WHERE token = ?').run(qrToken);
+  const attendanceId = randomUUID();
+  db.prepare('INSERT INTO attendance (id, user_id, type, qr_token) VALUES (?, ?, ?, ?)').run(attendanceId, userId, type, qrToken);
+  return { success: true, attendance_id: attendanceId, type, timestamp: new Date().toISOString() };
 });
 
 app.post('/api/attendance/mark', authenticateToken, (req, res) => {
-  const { qr_token, latitude, longitude, type } = req.body;
-  if (!qr_token || latitude === undefined || longitude === undefined || !type) return res.status(400).json({ error: 'Missing fields' });
-  if (typeof latitude !== 'number' || typeof longitude !== 'number') return res.status(400).json({ error: 'Invalid coordinates' });
+  const { qr_token, type } = req.body;
+  if (!qr_token || !type) return res.status(400).json({ error: 'Missing fields' });
   if (!['entry', 'exit'].includes(type)) return res.status(400).json({ error: 'Invalid type' });
-  verifyQRToken(qr_token, (err, decoded) => {
-    if (err) {
-      logWarn('Attendance failed: invalid/expired QR', { userId: req.user.id, ip: getClientIp(req) });
-      return res.status(400).json({ error: 'Invalid or expired QR' });
-    }
-    db.get('SELECT * FROM qr_tokens WHERE token = ? AND used = 0 AND expires_at > ?', [qr_token, new Date().toISOString()], (err, qrRow) => {
-      if (err) {
-        logError('Attendance failed: DB read QR error', { userId: req.user.id, error: err.message });
-        return res.status(500).json({ error: 'DB error' });
-      }
-      if (!qrRow) return res.status(400).json({ error: 'QR already used or expired' });
-      if (!checkGeofence(latitude, longitude)) {
-        logWarn('Attendance rejected: outside geofence', { userId: req.user.id, latitude, longitude, ip: getClientIp(req) });
-        return res.status(400).json({ error: 'Outside office radius' });
-      }
-      db.run('UPDATE qr_tokens SET used = 1 WHERE token = ?', [qr_token], (err) => {
-        if (err) {
-          logError('Attendance failed: DB update QR error', { userId: req.user.id, error: err.message });
-          return res.status(500).json({ error: 'DB error' });
-        }
-        const attendanceId = randomUUID();
-        db.run(
-          'INSERT INTO attendance (id, user_id, type, latitude, longitude, qr_token) VALUES (?, ?, ?, ?, ?, ?)',
-          [attendanceId, req.user.id, type, latitude, longitude, qr_token],
-          (err) => {
-            if (err) {
-              logError('Attendance failed: DB insert error', { userId: req.user.id, error: err.message });
-              return res.status(500).json({ error: 'DB error' });
-            }
-            logInfo('Attendance marked', { attendanceId, userId: req.user.id, type, latitude, longitude });
-            res.json({ success: true, attendance_id: attendanceId, type, timestamp: new Date().toISOString() });
-          }
-        );
-      });
-    });
-  });
+  try {
+    const decoded = verifyQRToken(qr_token);
+  } catch {
+    logWarn('Attendance failed: invalid/expired QR', { userId: req.user.id, ip: getClientIp(req) });
+    return res.status(400).json({ error: 'Invalid or expired QR' });
+  }
+  const result = markAttendance(req.user.id, qr_token, type);
+  if (result.error) {
+    logWarn('Attendance failed: ' + result.error, { userId: req.user.id, ip: getClientIp(req) });
+    return res.status(400).json({ error: result.error });
+  }
+  logInfo('Attendance marked', { attendanceId: result.attendance_id, userId: req.user.id, type });
+  res.json(result);
 });
 
 app.get('/api/attendance/my-history', authenticateToken, (req, res) => {
-  db.all('SELECT * FROM attendance WHERE user_id = ? ORDER BY timestamp DESC LIMIT 100', [req.user.id], (err, rows) => {
-    if (err) {
-      logError('My history query error', { userId: req.user.id, error: err.message });
-      return res.status(500).json({ error: 'DB error' });
-    }
+  const offset = parseInt(req.query.offset) || 0;
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  try {
+    const rows = db.prepare('SELECT * FROM attendance WHERE user_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?').all(req.user.id, limit, offset);
     res.json(rows);
-  });
+  } catch (err) {
+    logError('My history query error', { userId: req.user.id, error: err.message });
+    res.status(500).json({ error: 'DB error' });
+  }
 });
 
 app.get('/api/admin/attendance', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
-  db.all(`SELECT a.*, u.name, u.email FROM attendance a JOIN users u ON a.user_id = u.id ORDER BY a.timestamp DESC LIMIT 200`, [], (err, rows) => {
-    if (err) {
-      logError('Admin attendance query error', { userId: req.user.id, error: err.message });
-      return res.status(500).json({ error: 'DB error' });
-    }
+  const offset = parseInt(req.query.offset) || 0;
+  const limit = Math.min(parseInt(req.query.limit) || 200, 500);
+  try {
+    const rows = db.prepare('SELECT a.*, u.name, u.email FROM attendance a JOIN users u ON a.user_id = u.id ORDER BY a.timestamp DESC LIMIT ? OFFSET ?').all(limit, offset);
     res.json(rows);
-  });
+  } catch (err) {
+    logError('Admin attendance query error', { userId: req.user.id, error: err.message });
+    res.status(500).json({ error: 'DB error' });
+  }
 });
 
 app.get('/api/admin/users', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
-  db.all('SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC', [], (err, rows) => {
-    if (err) {
-      logError('Admin users query error', { userId: req.user.id, error: err.message });
-      return res.status(500).json({ error: 'DB error' });
-    }
+  try {
+    const rows = db.prepare('SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC').all();
     res.json(rows);
-  });
+  } catch (err) {
+    logError('Admin users query error', { userId: req.user.id, error: err.message });
+    res.status(500).json({ error: 'DB error' });
+  }
 });
 
 app.use((err, req, res, next) => {
@@ -227,7 +210,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Serve React SPA for all non-API routes
 app.get(/(.*)/, (req, res) => {
   res.sendFile(path.join(frontendBuildPath, 'index.html'));
 });

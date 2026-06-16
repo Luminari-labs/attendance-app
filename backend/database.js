@@ -1,4 +1,4 @@
-const sqlite3 = require('sqlite3').verbose();
+const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const { DB_PATH } = require('./config');
@@ -6,57 +6,65 @@ const { DB_PATH } = require('./config');
 const dbPath = path.resolve(__dirname, DB_PATH);
 const dbDir = path.dirname(dbPath);
 
-// Ensure data directory exists with proper permissions
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true, mode: 0o777 });
 }
 
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) console.error('DB Error:', err);
-  else console.log('Connected to SQLite at', dbPath);
-});
+const db = new Database(dbPath);
 
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS users (
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     role TEXT DEFAULT 'employee',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
+  )
+`);
 
-  db.run(`CREATE TABLE IF NOT EXISTS attendance (
+db.exec(`
+  CREATE TABLE IF NOT EXISTS attendance (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     type TEXT NOT NULL,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    latitude REAL,
-    longitude REAL,
     qr_token TEXT NOT NULL,
     FOREIGN KEY(user_id) REFERENCES users(id)
-  )`);
+  )
+`);
 
-  db.run(`CREATE TABLE IF NOT EXISTS qr_tokens (
+db.exec(`
+  CREATE TABLE IF NOT EXISTS qr_tokens (
     token TEXT PRIMARY KEY,
-    office_id TEXT DEFAULT 'main',
     expires_at DATETIME NOT NULL,
     used INTEGER DEFAULT 0
-  )`);
+  )
+`);
 
-  db.run(`CREATE TABLE IF NOT EXISTS settings (
+db.exec(`
+  CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
-  )`);
+  )
+`);
 
-  db.get("SELECT * FROM settings WHERE key='office_lat'", [], (err, row) => {
-    if (!row) {
-      db.run("INSERT INTO settings (key, value) VALUES ('office_lat', '19.4326')");
-      db.run("INSERT INTO settings (key, value) VALUES ('office_lng', '-99.1332')");
-      db.run("INSERT INTO settings (key, value) VALUES ('office_radius', '100')");
-      db.run("INSERT INTO settings (key, value) VALUES ('qr_interval', '5')");
-    }
-  });
-});
+try {
+  db.exec('ALTER TABLE attendance DROP COLUMN latitude');
+} catch {
+}
+
+try {
+  db.exec('ALTER TABLE attendance DROP COLUMN longitude');
+} catch {
+}
+
+try {
+  db.exec('ALTER TABLE qr_tokens DROP COLUMN office_id');
+} catch {
+}
 
 module.exports = db;
