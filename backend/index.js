@@ -13,10 +13,6 @@ const app = express();
 app.set('trust proxy', 1);
 const now = () => new Date().toISOString();
 const getClientIp = (req) => req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
-const isHttpsRequest = (req) => {
-  const forwardedProto = req.headers['x-forwarded-proto']?.split(',')[0]?.trim();
-  return req.secure || forwardedProto === 'https';
-};
 const maskEmail = (email = '') => {
   const [name, domain] = email.split('@');
   if (!name || !domain) return email || 'unknown';
@@ -26,22 +22,6 @@ const maskEmail = (email = '') => {
 const logInfo = (message, meta = {}) => console.log(`[${now()}] [INFO] ${message}`, meta);
 const logWarn = (message, meta = {}) => console.warn(`[${now()}] [WARN] ${message}`, meta);
 const logError = (message, meta = {}) => console.error(`[${now()}] [ERROR] ${message}`, meta);
-
-app.use((req, res, next) => {
-  const shouldEnforceHttps =
-    process.env.NODE_ENV === 'production' &&
-    process.env.ENFORCE_HTTPS !== 'false';
-
-  if (shouldEnforceHttps && !isHttpsRequest(req)) {
-    return res.redirect(308, `https://${req.headers.host}${req.originalUrl}`);
-  }
-
-  if (isHttpsRequest(req)) {
-    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  }
-
-  return next();
-});
 
 const corsOptions = {
   origin: config.FRONTEND_URL || 'http://localhost:3000',
