@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeScannerState } from 'html5-qrcode';
 import axios from 'axios';
 import {
   Container, Header, Title, LogoutButton, Card, CardTitle,
@@ -10,9 +10,37 @@ import {
 } from './DashboardStyles';
 
 const API_URL = '';
+const READER_ELEMENT_ID = 'reader';
+
+const getCameraErrorMessage = (err) => {
+  const msg = String(err?.message || err || '');
+
+  if (!window.isSecureContext) {
+    return 'La cámara solo funciona en HTTPS o localhost. Abre la app con HTTPS para escanear el QR.';
+  }
+
+  if (msg.includes('NotAllowed') || msg.includes('Permission') || msg.includes('denied')) {
+    return 'Permiso de cámara denegado. Concede permiso al navegador e intenta de nuevo.';
+  }
+
+  if (msg.includes('NotFound') || msg.includes('Requested device not found')) {
+    return 'No se encontró ninguna cámara en este dispositivo.';
+  }
+
+  if (msg.includes('NotReadable') || msg.includes('TrackStart')) {
+    return 'La cámara está ocupada por otra aplicación. Ciérrala e intenta de nuevo.';
+  }
+
+  if (msg.includes('Overconstrained')) {
+    return 'No se pudo usar la cámara solicitada. Intenta de nuevo o revisa los permisos del navegador.';
+  }
+
+  return 'Error al iniciar la cámara: ' + msg;
+};
 
 const Dashboard = () => {
   const [scanning, setScanning] = useState(false);
+  const [scannerStatus, setScannerStatus] = useState('');
   const [attendanceType, setAttendanceType] = useState('entry');
   const [message, setMessage] = useState('');
   const [history, setHistory] = useState([]);
@@ -26,6 +54,31 @@ const Dashboard = () => {
   const attendanceTypeRef = useRef(attendanceType);
   attendanceTypeRef.current = attendanceType;
 
+  const stopScanner = useCallback(async () => {
+    const scanner = scannerRef.current;
+    if (!scanner) return;
+
+    try {
+      const state = scanner.getState();
+      const isRunning = state === Html5QrcodeScannerState.SCANNING || state === Html5QrcodeScannerState.PAUSED;
+
+      if (isRunning) {
+        await scanner.stop();
+      }
+
+      scanner.clear();
+    } catch (err) {
+      console.warn('QR scanner cleanup failed:', err);
+      try {
+        scanner.clear();
+      } catch (_) {}
+    } finally {
+      if (scannerRef.current === scanner) {
+        scannerRef.current = null;
+      }
+    }
+  }, []);
+
   useEffect(() => {
     loadHistory();
   }, []);
@@ -33,7 +86,6 @@ const Dashboard = () => {
   useEffect(() => {
     if (!scanning) return;
     let stopped = false;
-    let scanner;
 
     const startScanner = async () => {
       const config = { fps: 10, qrbox: { width: 250, height: 250 } };
@@ -41,31 +93,45 @@ const Dashboard = () => {
       const onError = (err) => onScanErrorRef.current(err);
 
       try {
-        scanner = new Html5Qrcode("reader");
+        setMessage('');
+        setScannerStatus('Solicitando permiso de cámara...');
+
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('Camera API is not available in this browser');
+        }
+
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const readerElement = document.getElementById(READER_ELEMENT_ID);
+        if (!readerElement) {
+          throw new Error('QR reader container was not mounted');
+        }
+
+        const cameras = await Html5Qrcode.getCameras();
+        if (stopped) return;
+        if (!cameras.length) {
+          throw new Error('NotFoundError');
+        }
+
+        const preferredCamera =
+          cameras.find((camera) => /back|rear|environment|trasera/i.test(camera.label)) || cameras[0];
+
+        const scanner = new Html5Qrcode(READER_ELEMENT_ID);
         scannerRef.current = scanner;
 
-        const facingModes = ["environment", "user"];
-        for (const facingMode of facingModes) {
-          if (stopped) return;
-          try {
-            await scanner.start({ facingMode }, config, onSuccess, onError);
-            return;
-          } catch (err) {
-            if (facingMode === facingModes[facingModes.length - 1]) throw err;
-            console.warn(`Camera "${facingMode}" not available, trying next:`, err);
-          }
+        setScannerStatus('Abriendo cámara...');
+        await scanner.start(preferredCamera.id, config, onSuccess, onError);
+        if (stopped) {
+          await stopScanner();
+          return;
         }
+
+        setScannerStatus('Apunta la cámara al código QR.');
       } catch (err) {
         if (stopped) return;
         console.error('Camera error:', err);
-        const msg = String(err);
-        if (msg.includes('NotAllowed') || msg.includes('Permission')) {
-          setMessage('Permiso de cámara denegado. Asegúrate de usar HTTPS o localhost y conceder permiso.');
-        } else if (msg.includes('NotFoundError')) {
-          setMessage('No se encontró ninguna cámara en este dispositivo.');
-        } else {
-          setMessage('Error al iniciar la cámara: ' + (err.message || err));
-        }
+        setMessage(getCameraErrorMessage(err));
+        setScannerStatus('');
+        await stopScanner();
         setScanning(false);
       }
     };
@@ -74,11 +140,9 @@ const Dashboard = () => {
 
     return () => {
       stopped = true;
-      if (scannerRef.current) {
-        scannerRef.current.stop().then(() => scannerRef.current.clear()).catch(() => {});
-      }
+      void stopScanner();
     };
-  }, [scanning]);
+  }, [scanning, stopScanner]);
 
   const loadHistory = async () => {
     try {
@@ -93,15 +157,14 @@ const Dashboard = () => {
   };
 
   const startScanning = () => {
+    setMessage('');
+    setScannerStatus('');
     setScanning(true);
   };
 
-  const stopScanning = () => {
-    if (scannerRef.current) {
-      scannerRef.current.stop().then(() => {
-        scannerRef.current.clear();
-      }).catch(() => {});
-    }
+  const stopScanning = async () => {
+    await stopScanner();
+    setScannerStatus('');
     setScanning(false);
   };
 
@@ -110,7 +173,7 @@ const Dashboard = () => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.post(
+      await axios.post(
         `${API_URL}/api/attendance/mark`,
         { qr_token: decodedText, type: attendanceTypeRef.current },
         { headers: { Authorization: `Bearer ${token}` } }
@@ -160,7 +223,8 @@ const Dashboard = () => {
           <Button onClick={startScanning}>Scan QR Code</Button>
         ) : (
           <div>
-            <ReaderContainer id="reader" />
+            {scannerStatus && <LoadingText>{scannerStatus}</LoadingText>}
+            <ReaderContainer id={READER_ELEMENT_ID} />
             <Button $danger $marginTop onClick={stopScanning}>Cancel Scan</Button>
           </div>
         )}

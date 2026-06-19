@@ -19,7 +19,7 @@ const AdminDashboard = () => {
   const [qrExpiry, setQrExpiry] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [showQR, setShowQR] = useState(false);
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {

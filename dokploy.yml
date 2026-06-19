@@ -11,6 +11,7 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - QR_SECRET=${QR_SECRET}
       - FRONTEND_URL=${FRONTEND_URL}
+      - ENFORCE_HTTPS=true
     volumes:
       - ./data:/app/data
     restart: unless-stopped
