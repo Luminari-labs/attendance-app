@@ -188,6 +188,20 @@ app.get('/api/admin/attendance', authenticateToken, (req, res) => {
   }
 });
 
+app.delete('/api/admin/attendance/:id', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  const { id } = req.params;
+  try {
+    const result = db.prepare('DELETE FROM attendance WHERE id = ?').run(id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Attendance not found' });
+    logInfo('Attendance deleted', { attendanceId: id, userId: req.user.id });
+    res.json({ success: true });
+  } catch (err) {
+    logError('Delete attendance error', { userId: req.user.id, error: err.message });
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
 app.get('/api/admin/users', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
   try {

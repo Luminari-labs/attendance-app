@@ -11,6 +11,9 @@ import {
 
 const API_URL = '';
 const READER_ELEMENT_ID = 'reader';
+const EC_TIMEZONE = 'America/Guayaquil';
+const formatEC = (date) => new Date(date).toLocaleString('es-EC', { timeZone: EC_TIMEZONE });
+const formatTimeEC = (date) => new Date(date).toLocaleTimeString('es-EC', { timeZone: EC_TIMEZONE });
 
 const getCameraErrorMessage = (err) => {
   const msg = String(err?.message || err || '');
@@ -178,7 +181,7 @@ const Dashboard = () => {
         { qr_token: decodedText, type: attendanceTypeRef.current },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setMessage(`Success! ${attendanceTypeRef.current} marked at ${new Date().toLocaleTimeString()}`);
+      setMessage(`Success! ${attendanceTypeRef.current} marked at ${formatTimeEC(new Date())} (Ecuador/Guayaquil)`);
       loadHistory();
     } catch (err) {
       setMessage('Error: ' + (err.response?.data?.error || err.message));
@@ -239,14 +242,14 @@ const Dashboard = () => {
           <thead>
             <tr>
               <TableHeader>Type</TableHeader>
-              <TableHeader>Timestamp</TableHeader>
+              <TableHeader>Timestamp (Ecuador/Guayaquil)</TableHeader>
             </tr>
           </thead>
           <tbody>
             {history.map((record) => (
               <tr key={record.id}>
                 <TableCell>{record.type}</TableCell>
-                <TableCell>{new Date(record.timestamp).toLocaleString()}</TableCell>
+                <TableCell>{formatEC(record.timestamp)}</TableCell>
               </tr>
             ))}
           </tbody>

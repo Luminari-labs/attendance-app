@@ -11,6 +11,11 @@ import {
 
 const API_URL = '';
 
+const EC_TIMEZONE = 'America/Guayaquil';
+const formatEC = (date) => new Date(date).toLocaleString('es-EC', { timeZone: EC_TIMEZONE });
+const formatDateEC = (date) => new Date(date).toLocaleDateString('es-EC', { timeZone: EC_TIMEZONE });
+const formatTimeEC = (date) => new Date(date).toLocaleTimeString('es-EC', { timeZone: EC_TIMEZONE });
+
 const AdminDashboard = () => {
   const [users, setUsers] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -48,6 +53,19 @@ const AdminDashboard = () => {
       setAttendance(res.data);
     } catch (err) {
       console.error('Failed to load attendance', err);
+    }
+  };
+
+  const handleDelete = async (attendanceId) => {
+    if (!window.confirm('Are you sure you want to delete this attendance record?')) return;
+    try {
+      const token = localStorage.getItem('token');
+      await axios.delete(`${API_URL}/api/admin/attendance/${attendanceId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      loadAttendance();
+    } catch (err) {
+      alert('Failed to delete: ' + (err.response?.data?.error || err.message));
     }
   };
 
@@ -90,7 +108,7 @@ const AdminDashboard = () => {
         </Button>
         {showQR && qrToken && (
           <QRContainer>
-            <div>QR Token (expires at {qrExpiry?.toLocaleTimeString()}):</div>
+            <div>QR Token (expires at {qrExpiry ? formatTimeEC(qrExpiry) : ''} Ecuador/Guayaquil):</div>
             <QRToken>{qrToken}</QRToken>
             <QRImage src={qrImageData} alt="QR Code" />
           </QRContainer>
@@ -115,7 +133,7 @@ const AdminDashboard = () => {
                 <TableCell>{u.name}</TableCell>
                 <TableCell>{u.email}</TableCell>
                 <TableCell>{u.role}</TableCell>
-                <TableCell>{new Date(u.created_at).toLocaleDateString()}</TableCell>
+                <TableCell>{formatDateEC(u.created_at)}</TableCell>
               </tr>
             ))}
           </tbody>
@@ -123,26 +141,53 @@ const AdminDashboard = () => {
       </Section>
 
       <Section>
-        <CardTitle>Recent Attendance</CardTitle>
+        <CardTitle>Attendance by Employee</CardTitle>
         <RefreshButton onClick={loadAttendance}>Refresh</RefreshButton>
-        <Table>
-          <thead>
-            <tr>
-              <TableHeader>Employee</TableHeader>
-              <TableHeader>Type</TableHeader>
-              <TableHeader>Timestamp</TableHeader>
-            </tr>
-          </thead>
-          <tbody>
-            {attendance.slice(0, 50).map((a) => (
-              <tr key={a.id}>
-                <TableCell>{a.name} ({a.email})</TableCell>
-                <TableCell>{a.type}</TableCell>
-                <TableCell>{new Date(a.timestamp).toLocaleString()}</TableCell>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+        {Object.entries(
+          attendance.reduce((groups, record) => {
+            const key = record.user_id;
+            if (!groups[key]) groups[key] = { name: record.name, email: record.email, records: [] };
+            groups[key].records.push(record);
+            return groups;
+          }, {})
+        ).map(([userId, group]) => (
+          <div key={userId} style={{ marginBottom: 24 }}>
+            <h4 style={{ margin: '12px 0 4px' }}>{group.name} ({group.email})</h4>
+            <Table>
+              <thead>
+                <tr>
+                  <TableHeader>Type</TableHeader>
+                  <TableHeader>Timestamp (Ecuador/Guayaquil)</TableHeader>
+                  <TableHeader>Actions</TableHeader>
+                </tr>
+              </thead>
+              <tbody>
+                {group.records.map((a) => (
+                  <tr key={a.id}>
+                    <TableCell>{a.type}</TableCell>
+                    <TableCell>{formatEC(a.timestamp)}</TableCell>
+                    <TableCell>
+                      <button
+                        onClick={() => handleDelete(a.id)}
+                        style={{
+                          padding: '4px 10px',
+                          background: '#dc3545',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          fontSize: 13
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </TableCell>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+        ))}
       </Section>
     </Container>
   );
