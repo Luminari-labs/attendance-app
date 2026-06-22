@@ -67,4 +67,14 @@ try {
 } catch {
 }
 
+const adminExists = db.prepare("SELECT id FROM users WHERE email = 'admin@luminari-labs.space'").get();
+if (!adminExists) {
+  const bcrypt = require('bcryptjs');
+  const { randomUUID } = require('crypto');
+  const id = randomUUID();
+  const hash = bcrypt.hashSync('admin123', 10);
+  db.prepare('INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)').run(id, 'Admin', 'admin@luminari-labs.space', hash, 'admin');
+  console.log('[DB] Admin user seeded (admin@luminari-labs.space / admin123)');
+}
+
 module.exports = db;

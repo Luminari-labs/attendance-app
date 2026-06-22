@@ -4,9 +4,9 @@ import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 import QRCode from 'qrcode';
 import {
-  Container, Header, Title, LogoutButton, Card, CardTitle,
-  Button, QRContainer, QRToken, QRImage, Section, RefreshButton,
-  Table, TableHeader, TableCell
+  Container, Header, Title, LogoutButton, Card, CardTitle, Button,
+  QRContainer, QRToken, QRImage, Section, RefreshButton, Table,
+  TableHeader, TableCell
 } from './AdminDashboardStyles';
 
 const API_URL = '';
