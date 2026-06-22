@@ -15,7 +15,7 @@ if [ ! -f "$DB_PATH" ]; then
 fi
 
 echo "Checking for existing admin user..."
-ADMIN_EXISTS=$(sqlite3 "$DB_PATH" "SELECT email FROM users WHERE email='admin@company.com';" 2>/dev/null)
+ADMIN_EXISTS=$(sqlite3 "$DB_PATH" "SELECT email FROM users WHERE email='admin@luminari-labs.space';" 2>/dev/null)
 
 if [ -n "$ADMIN_EXISTS" ]; then
     echo "Admin user exists. Resetting password..."
@@ -25,7 +25,7 @@ const db = require('./database');
 const { randomUUID } = require('crypto');
 
 bcrypt.hash('admin123', 10).then(hash => {
-    db.run('UPDATE users SET password_hash = ? WHERE email = ?', [hash, 'admin@company.com'], (err) => {
+    db.run('UPDATE users SET password_hash = ? WHERE email = ?', [hash, 'admin@luminari-labs.space'], (err) => {
         if (err) {
             console.log('ERROR:', err.message);
             process.exit(1);
@@ -44,7 +44,7 @@ const { randomUUID } = require('crypto');
 const config = require('./config');
 
 const id = randomUUID();
-const email = 'admin@company.com';
+const email = 'admin@luminari-labs.space';
 const name = 'Admin';
 const role = 'admin';
 const password = 'admin123';
@@ -57,7 +57,7 @@ bcrypt.hash(password, 10).then(hash => {
             process.exit(1);
         }
         console.log('Admin user created successfully!');
-        console.log('Credentials: admin@company.com / admin123');
+        console.log('Credentials: admin@luminari-labs.space / admin123');
         process.exit(0);
     });
 });

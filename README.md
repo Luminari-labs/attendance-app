@@ -51,7 +51,7 @@ Aplicación completa: http://localhost:3001
 
 ## Credenciales por Defecto
 
-- **Admin**: admin@company.com / admin123
+- **Admin**: admin@luminari-labs.space / admin123
 - **Empleado**: Regístrate desde la página de login
 
 ## Flujo de Uso

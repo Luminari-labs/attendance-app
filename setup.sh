@@ -13,7 +13,7 @@ echo "3. Creating admin user..."
 sleep 2
 curl -s -X POST http://localhost:3001/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"name":"Admin","email":"admin@company.com","password":"admin123","role":"admin"}' > /dev/null
+  -d '{"name":"Admin","email":"admin@luminari-labs.space","password":"admin123","role":"admin"}' > /dev/null
 
 echo "4. Installing frontend dependencies..."
 cd /root/attendance-app/frontend
@@ -27,6 +27,6 @@ echo ""
 echo "Setup complete!"
 echo "Backend: http://localhost:3001"
 echo "Frontend: http://localhost:3000"
-echo "Admin credentials: admin@company.com / admin123"
+echo "Admin credentials: admin@luminari-labs.space / admin123"
 echo ""
 echo "Logs: backend/backend.log frontend/frontend.log"
