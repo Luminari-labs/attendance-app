@@ -176,12 +176,12 @@ const Dashboard = () => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      await axios.post(
+      const res = await axios.post(
         `${API_URL}/api/attendance/mark`,
         { qr_token: decodedText, type: attendanceTypeRef.current },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setMessage(`Success! ${attendanceTypeRef.current} marked at ${formatTimeEC(new Date())} (Ecuador/Guayaquil)`);
+      setMessage(`Success! ${attendanceTypeRef.current} marked at ${formatTimeEC(res.data.timestamp)} (Ecuador/Guayaquil)`);
       loadHistory();
     } catch (err) {
       setMessage('Error: ' + (err.response?.data?.error || err.message));

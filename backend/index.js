@@ -163,12 +163,14 @@ app.post('/api/attendance/mark', authenticateToken, (req, res) => {
   res.json(result);
 });
 
+const toISO = (ts) => ts && ts.replace(' ', 'T') + 'Z';
+
 app.get('/api/attendance/my-history', authenticateToken, (req, res) => {
   const offset = parseInt(req.query.offset) || 0;
   const limit = Math.min(parseInt(req.query.limit) || 100, 500);
   try {
     const rows = db.prepare('SELECT * FROM attendance WHERE user_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?').all(req.user.id, limit, offset);
-    res.json(rows);
+    res.json(rows.map(r => ({ ...r, timestamp: toISO(r.timestamp) })));
   } catch (err) {
     logError('My history query error', { userId: req.user.id, error: err.message });
     res.status(500).json({ error: 'DB error' });
@@ -181,7 +183,7 @@ app.get('/api/admin/attendance', authenticateToken, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 200, 500);
   try {
     const rows = db.prepare('SELECT a.*, u.name, u.email FROM attendance a JOIN users u ON a.user_id = u.id ORDER BY a.timestamp DESC LIMIT ? OFFSET ?').all(limit, offset);
-    res.json(rows);
+    res.json(rows.map(r => ({ ...r, timestamp: toISO(r.timestamp) })));
   } catch (err) {
     logError('Admin attendance query error', { userId: req.user.id, error: err.message });
     res.status(500).json({ error: 'DB error' });
@@ -206,7 +208,7 @@ app.get('/api/admin/users', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
   try {
     const rows = db.prepare('SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC').all();
-    res.json(rows);
+    res.json(rows.map(r => ({ ...r, created_at: toISO(r.created_at) })));
   } catch (err) {
     logError('Admin users query error', { userId: req.user.id, error: err.message });
     res.status(500).json({ error: 'DB error' });

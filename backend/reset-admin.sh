@@ -15,52 +15,50 @@ if [ ! -f "$DB_PATH" ]; then
 fi
 
 echo "Checking for existing admin user..."
-ADMIN_EXISTS=$(sqlite3 "$DB_PATH" "SELECT email FROM users WHERE email='admin@luminari-labs.space';" 2>/dev/null)
+ADMIN_EXISTS=$(node -e "
+const Database = require('better-sqlite3');
+const db = new Database('$DB_PATH');
+const row = db.prepare(\"SELECT email FROM users WHERE email='admin@luminari-labs.space'\").get();
+console.log(row ? row.email : '');
+db.close();
+")
 
 if [ -n "$ADMIN_EXISTS" ]; then
     echo "Admin user exists. Resetting password..."
     node -e "
 const bcrypt = require('bcryptjs');
-const db = require('./database');
-const { randomUUID } = require('crypto');
+const Database = require('better-sqlite3');
+const db = new Database('$DB_PATH');
 
-bcrypt.hash('admin123', 10).then(hash => {
-    db.run('UPDATE users SET password_hash = ? WHERE email = ?', [hash, 'admin@luminari-labs.space'], (err) => {
-        if (err) {
-            console.log('ERROR:', err.message);
-            process.exit(1);
-        }
-        console.log('Password reset successfully!');
-        process.exit(0);
-    });
-});
+const hash = bcrypt.hashSync('admin123', 10);
+const info = db.prepare('UPDATE users SET password_hash = ? WHERE email = ?').run(hash, 'admin@luminari-labs.space');
+if (info.changes > 0) {
+    console.log('Password reset successfully!');
+} else {
+    console.log('ERROR: User not found');
+    process.exit(1);
+}
+db.close();
 "
 else
     echo "Admin user not found. Creating new admin..."
     node -e "
 const bcrypt = require('bcryptjs');
-const db = require('./database');
 const { randomUUID } = require('crypto');
-const config = require('./config');
+const Database = require('better-sqlite3');
+const db = new Database('$DB_PATH');
 
 const id = randomUUID();
 const email = 'admin@luminari-labs.space';
 const name = 'Admin';
 const role = 'admin';
 const password = 'admin123';
+const hash = bcrypt.hashSync(password, 10);
 
-bcrypt.hash(password, 10).then(hash => {
-    db.run('INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)', 
-        [id, name, email, hash, role], (err) => {
-        if (err) {
-            console.log('ERROR:', err.message);
-            process.exit(1);
-        }
-        console.log('Admin user created successfully!');
-        console.log('Credentials: admin@luminari-labs.space / admin123');
-        process.exit(0);
-    });
-});
+db.prepare('INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)').run(id, name, email, hash, role);
+console.log('Admin user created successfully!');
+console.log('Credentials: admin@luminari-labs.space / admin123');
+db.close();
 "
 fi
 
