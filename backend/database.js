@@ -52,6 +52,43 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS work_schedules (
+    id TEXT PRIMARY KEY,
+    user_id TEXT,
+    day_of_week INTEGER NOT NULL,
+    start_time TEXT,
+    end_time TEXT,
+    is_workday INTEGER DEFAULT 1,
+    UNIQUE(user_id, day_of_week),
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS fines (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    type TEXT NOT NULL,
+    details TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE(user_id, date, type)
+  )
+`);
+
+const generalSchedulesCount = db.prepare("SELECT COUNT(*) as count FROM work_schedules WHERE user_id IS NULL").get().count;
+if (generalSchedulesCount === 0) {
+  const { randomUUID } = require('crypto');
+  const insertStmt = db.prepare("INSERT INTO work_schedules (id, user_id, day_of_week, start_time, end_time, is_workday) VALUES (?, NULL, ?, NULL, NULL, ?)");
+  for (let i = 0; i < 7; i++) {
+    const isWorkday = (i >= 1 && i <= 5) ? 1 : 0;
+    insertStmt.run(randomUUID(), i, isWorkday);
+  }
+  console.log('[DB] Default general work schedules seeded (Mon-Fri workdays)');
+}
+
 try {
   db.exec('ALTER TABLE attendance DROP COLUMN latitude');
 } catch {

@@ -6,7 +6,7 @@ import axios from 'axios';
 import {
   Container, Header, Title, LogoutButton, Card, CardTitle,
   RadioGroup, RadioLabel, Button, ReaderContainer,
-  Message, LoadingText, HistorySection, Table, TableHeader, TableCell
+  Message, LoadingText, HistorySection, Table, TableHeader, TableCell, FinesSection
 } from './DashboardStyles';
 
 const API_URL = '';
@@ -41,12 +41,20 @@ const getCameraErrorMessage = (err) => {
   return 'Error al iniciar la cámara: ' + msg;
 };
 
+const FINE_TYPE_LABELS = {
+  missing_entry: 'Falta Entrada',
+  missing_exit: 'Falta Salida',
+  late_entry: 'Entrada Tarde',
+  early_exit: 'Salida Temprana'
+};
+
 const Dashboard = () => {
   const [scanning, setScanning] = useState(false);
   const [scannerStatus, setScannerStatus] = useState('');
   const [attendanceType, setAttendanceType] = useState('entry');
   const [message, setMessage] = useState('');
   const [history, setHistory] = useState([]);
+  const [fines, setFines] = useState([]);
   const [loading, setLoading] = useState(false);
   const scannerRef = useRef(null);
   const { user, logout } = useAuth();
@@ -84,7 +92,20 @@ const Dashboard = () => {
 
   useEffect(() => {
     loadHistory();
+    loadFines();
   }, []);
+
+  const loadFines = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.get(`${API_URL}/api/attendance/my-fines`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setFines(res.data);
+    } catch (err) {
+      console.error('Failed to load fines', err);
+    }
+  };
 
   useEffect(() => {
     if (!scanning) return;
@@ -237,24 +258,54 @@ const Dashboard = () => {
       </Card>
 
       <HistorySection>
-        <CardTitle>My Attendance History</CardTitle>
+        <CardTitle>Historial de Asistencias (Ecuador/Guayaquil)</CardTitle>
         <Table>
           <thead>
             <tr>
-              <TableHeader>Type</TableHeader>
-              <TableHeader>Timestamp (Ecuador/Guayaquil)</TableHeader>
+              <TableHeader>Tipo</TableHeader>
+              <TableHeader>Fecha y Hora</TableHeader>
             </tr>
           </thead>
           <tbody>
             {history.map((record) => (
               <tr key={record.id}>
-                <TableCell>{record.type}</TableCell>
+                <TableCell style={{ fontWeight: '600' }}>
+                  {record.type === 'entry' ? 'Entrada' : 'Salida'}
+                </TableCell>
                 <TableCell>{formatEC(record.timestamp)}</TableCell>
               </tr>
             ))}
           </tbody>
         </Table>
       </HistorySection>
+
+      <FinesSection>
+        <CardTitle>Mis Multas</CardTitle>
+        {fines.length === 0 ? (
+          <p style={{ fontSize: '14px', color: '#666' }}>No registras multas de asistencia.</p>
+        ) : (
+          <Table>
+            <thead>
+              <tr>
+                <TableHeader>Fecha</TableHeader>
+                <TableHeader>Infracción</TableHeader>
+                <TableHeader>Detalles</TableHeader>
+              </tr>
+            </thead>
+            <tbody>
+              {fines.map((fine) => (
+                <tr key={fine.id}>
+                  <TableCell>{fine.date}</TableCell>
+                  <TableCell style={{ color: '#dc3545', fontWeight: '600' }}>
+                    {FINE_TYPE_LABELS[fine.type] || fine.type}
+                  </TableCell>
+                  <TableCell>{fine.details}</TableCell>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        )}
+      </FinesSection>
     </Container>
   );
 };

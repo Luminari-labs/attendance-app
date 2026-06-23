@@ -1,12 +1,31 @@
 const { request, app, bcrypt, jwt } = require('./setup');
 
 describe('Auth API', () => {
-  test('Register new user', async () => {
+  let adminToken;
+
+  beforeAll(async () => {
+    // Log in as seeded admin
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@luminari-labs.space', password: 'admin123' });
+    adminToken = loginRes.body.token;
+  });
+
+  test('Public registration is disabled (returns 403)', async () => {
     const res = await request(app)
       .post('/api/auth/register')
-      .send({ name: 'Test User', email: 'test@test.com', password: 'password123' });
+      .send({ name: 'Public User', email: 'public@test.com', password: 'password123' });
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toBe('Registration is disabled. Please contact the administrator.');
+  });
+
+  test('Register new user via admin', async () => {
+    const res = await request(app)
+      .post('/api/admin/users')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Test User', email: 'test@test.com', password: 'password123', role: 'employee' });
     expect(res.statusCode).toBe(200);
-    expect(res.body.token).toBeDefined();
+    expect(res.body.success).toBe(true);
     expect(res.body.user.email).toBe('test@test.com');
   });
 
@@ -25,9 +44,10 @@ describe('Auth API', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  test('Register with invalid email', async () => {
+  test('Register with invalid email via admin', async () => {
     const res = await request(app)
-      .post('/api/auth/register')
+      .post('/api/admin/users')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({ name: 'Test', email: 'invalid', password: 'password123' });
     expect(res.statusCode).toBe(400);
   });
@@ -36,10 +56,10 @@ describe('Auth API', () => {
 describe('QR API', () => {
   let adminToken;
   beforeAll(async () => {
-    const res = await request(app)
-      .post('/api/auth/register')
-      .send({ name: 'Admin', email: 'admin@test.com', password: 'admin123', role: 'admin' });
-    adminToken = res.body.token;
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@luminari-labs.space', password: 'admin123' });
+    adminToken = loginRes.body.token;
   });
 
   test('Generate QR token as admin', async () => {
@@ -52,10 +72,18 @@ describe('QR API', () => {
   });
 
   test('Reject QR generation for non-admin', async () => {
-    const res = await request(app)
-      .post('/api/auth/register')
-      .send({ name: 'User', email: 'user@test.com', password: 'password123' });
-    const userToken = res.body.token;
+    // Create an employee user
+    await request(app)
+      .post('/api/admin/users')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'User', email: 'user@test.com', password: 'password123', role: 'employee' });
+
+    // Log in as employee
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'user@test.com', password: 'password123' });
+    const userToken = loginRes.body.token;
+
     const qrRes = await request(app)
       .get('/api/qr/current')
       .set('Authorization', `Bearer ${userToken}`);

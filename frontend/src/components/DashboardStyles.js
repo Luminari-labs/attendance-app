@@ -111,3 +111,7 @@ export const TableCell = styled.td`
   padding: 8px;
   border: 1px solid #ddd;
 `;
+
+export const FinesSection = styled.div`
+  margin-top: 30px;
+`;

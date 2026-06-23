@@ -80,22 +80,9 @@ const authenticateToken = (req, res, next) => {
 const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 const validatePassword = (password) => password && password.length >= 6;
 
-app.post('/api/auth/register', authLimiter, async (req, res) => {
-  const { name, email, password, role } = req.body;
-  if (!name || !email || !password) return res.status(400).json({ error: 'Missing fields' });
-  if (!validateEmail(email)) return res.status(400).json({ error: 'Invalid email format' });
-  if (!validatePassword(password)) return res.status(400).json({ error: 'Password must be at least 6 characters' });
-  const password_hash = await bcrypt.hash(password, 10);
-  const id = randomUUID();
-  try {
-    db.prepare('INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)').run(id, name, email, password_hash, role || 'employee');
-    const token = jwt.sign({ id, email, role: role || 'employee' }, config.JWT_SECRET);
-    logInfo('Register success', { email: maskEmail(email), role: role || 'employee', ip: getClientIp(req) });
-    res.json({ token, user: { id, name, email, role: role || 'employee' } });
-  } catch (err) {
-    logWarn('Register failed', { email: maskEmail(email), ip: getClientIp(req), error: err.message });
-    res.status(400).json({ error: 'Email already exists' });
-  }
+app.post('/api/auth/register', authLimiter, (req, res) => {
+  logWarn('Public registration attempt blocked', { ip: getClientIp(req) });
+  res.status(403).json({ error: 'Registration is disabled. Please contact the administrator.' });
 });
 
 app.post('/api/auth/login', authLimiter, async (req, res) => {
@@ -163,7 +150,115 @@ app.post('/api/attendance/mark', authenticateToken, (req, res) => {
   res.json(result);
 });
 
-const toISO = (ts) => ts && ts.replace(' ', 'T') + 'Z';
+const toISO = (ts) => {
+  if (!ts) return ts;
+  if (ts.endsWith('Z')) return ts;
+  if (ts.includes('T')) return ts + 'Z';
+  return ts.replace(' ', 'T') + 'Z';
+};
+
+const getLocalDateString = (dateObj) => {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Guayaquil',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  const parts = formatter.formatToParts(dateObj);
+  const year = parts.find(p => p.type === 'year').value;
+  const month = parts.find(p => p.type === 'month').value;
+  const day = parts.find(p => p.type === 'day').value;
+  return `${year}-${month}-${day}`;
+};
+
+const getLocalTimeString = (dateObj) => {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Guayaquil',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  });
+  const parts = formatter.formatToParts(dateObj);
+  let hour = parts.find(p => p.type === 'hour').value;
+  const minute = parts.find(p => p.type === 'minute').value;
+  if (hour === '24') hour = '00';
+  return `${hour}:${minute}`;
+};
+
+const getDatesRange = (startDateStr, endDateStr) => {
+  const dates = [];
+  let curr = new Date(startDateStr + 'T12:00:00Z');
+  const end = new Date(endDateStr + 'T12:00:00Z');
+  while (curr <= end) {
+    const y = curr.getUTCFullYear();
+    const m = String(curr.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(curr.getUTCDate()).padStart(2, '0');
+    dates.push(`${y}-${m}-${d}`);
+    curr.setUTCDate(curr.getUTCDate() + 1);
+  }
+  return dates;
+};
+
+const syncFinesForUser = (userId) => {
+  const user = db.prepare('SELECT created_at FROM users WHERE id = ?').get(userId);
+  if (!user) return;
+  
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const yesterdayStr = getLocalDateString(yesterday);
+  const createdDateStr = getLocalDateString(new Date(toISO(user.created_at)));
+  
+  if (createdDateStr > yesterdayStr) return;
+  
+  const datesToCheck = getDatesRange(createdDateStr, yesterdayStr);
+  const attendanceRows = db.prepare('SELECT * FROM attendance WHERE user_id = ?').all(userId);
+  
+  const attendanceByDate = {};
+  for (const row of attendanceRows) {
+    const localDate = getLocalDateString(new Date(toISO(row.timestamp)));
+    if (!attendanceByDate[localDate]) attendanceByDate[localDate] = [];
+    attendanceByDate[localDate].push(row);
+  }
+  
+  for (const dateStr of datesToCheck) {
+    const dateObj = new Date(dateStr + 'T12:00:00Z');
+    const dayOfWeek = dateObj.getUTCDay();
+    
+    let schedule = db.prepare('SELECT * FROM work_schedules WHERE user_id = ? AND day_of_week = ?').get(userId, dayOfWeek);
+    if (!schedule) {
+      schedule = db.prepare('SELECT * FROM work_schedules WHERE user_id IS NULL AND day_of_week = ?').get(dayOfWeek);
+    }
+    
+    if (!schedule || schedule.is_workday === 0) continue;
+    
+    const dayRecords = attendanceByDate[dateStr] || [];
+    const entries = dayRecords.filter(r => r.type === 'entry').sort((a, b) => new Date(toISO(a.timestamp)) - new Date(toISO(b.timestamp)));
+    const exits = dayRecords.filter(r => r.type === 'exit').sort((a, b) => new Date(toISO(a.timestamp)) - new Date(toISO(b.timestamp)));
+    
+    if (entries.length === 0) {
+      db.prepare('INSERT OR IGNORE INTO fines (id, user_id, date, type, details) VALUES (?, ?, ?, ?, ?)')
+        .run(randomUUID(), userId, dateStr, 'missing_entry', `Falta de registro de entrada el ${dateStr}`);
+    } else if (schedule.start_time) {
+      const earliestEntry = entries[0];
+      const entryTimeStr = getLocalTimeString(new Date(toISO(earliestEntry.timestamp)));
+      if (entryTimeStr > schedule.start_time) {
+        db.prepare('INSERT OR IGNORE INTO fines (id, user_id, date, type, details) VALUES (?, ?, ?, ?, ?)')
+          .run(randomUUID(), userId, dateStr, 'late_entry', `Entrada tarde el ${dateStr}: registrada a las ${entryTimeStr}, requerida: ${schedule.start_time}`);
+      }
+    }
+    
+    if (exits.length === 0) {
+      db.prepare('INSERT OR IGNORE INTO fines (id, user_id, date, type, details) VALUES (?, ?, ?, ?, ?)')
+        .run(randomUUID(), userId, dateStr, 'missing_exit', `Falta de registro de salida el ${dateStr}`);
+    } else if (schedule.end_time) {
+      const latestExit = exits[exits.length - 1];
+      const exitTimeStr = getLocalTimeString(new Date(toISO(latestExit.timestamp)));
+      if (exitTimeStr < schedule.end_time) {
+        db.prepare('INSERT OR IGNORE INTO fines (id, user_id, date, type, details) VALUES (?, ?, ?, ?, ?)')
+          .run(randomUUID(), userId, dateStr, 'early_exit', `Salida antes de tiempo el ${dateStr}: registrada a las ${exitTimeStr}, requerida: ${schedule.end_time}`);
+      }
+    }
+  }
+};
 
 app.get('/api/attendance/my-history', authenticateToken, (req, res) => {
   const offset = parseInt(req.query.offset) || 0;
@@ -211,6 +306,122 @@ app.get('/api/admin/users', authenticateToken, (req, res) => {
     res.json(rows.map(r => ({ ...r, created_at: toISO(r.created_at) })));
   } catch (err) {
     logError('Admin users query error', { userId: req.user.id, error: err.message });
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+app.post('/api/admin/users', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  const { name, email, password, role } = req.body;
+  if (!name || !email || !password) return res.status(400).json({ error: 'Missing fields' });
+  if (!validateEmail(email)) return res.status(400).json({ error: 'Invalid email format' });
+  if (!validatePassword(password)) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const password_hash = await bcrypt.hash(password, 10);
+  const id = randomUUID();
+  try {
+    db.prepare('INSERT INTO users (id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?)').run(id, name, email, password_hash, role || 'employee');
+    logInfo('User created by admin', { creator: req.user.email, email: maskEmail(email), role: role || 'employee', ip: getClientIp(req) });
+    res.json({ success: true, user: { id, name, email, role: role || 'employee' } });
+  } catch (err) {
+    logWarn('User creation by admin failed', { email: maskEmail(email), ip: getClientIp(req), error: err.message });
+    res.status(400).json({ error: 'Email already exists' });
+  }
+});
+
+app.get('/api/admin/schedules', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  try {
+    const rows = db.prepare('SELECT * FROM work_schedules').all();
+    res.json(rows);
+  } catch (err) {
+    logError('Get schedules error', { error: err.message });
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+app.post('/api/admin/schedules', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  const { user_id, schedules } = req.body;
+  if (!Array.isArray(schedules)) return res.status(400).json({ error: 'Schedules must be an array' });
+  
+  const upsertStmt = db.prepare(`
+    INSERT INTO work_schedules (id, user_id, day_of_week, start_time, end_time, is_workday)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, day_of_week) DO UPDATE SET
+      start_time = excluded.start_time,
+      end_time = excluded.end_time,
+      is_workday = excluded.is_workday
+  `);
+
+  try {
+    const runTransaction = db.transaction(() => {
+      for (const s of schedules) {
+        upsertStmt.run(randomUUID(), user_id || null, s.day_of_week, s.start_time || null, s.end_time || null, s.is_workday);
+      }
+    });
+    runTransaction();
+    logInfo('Schedules updated', { admin: req.user.email, for_user: user_id || 'general' });
+    res.json({ success: true });
+  } catch (err) {
+    logError('Save schedules error', { error: err.message });
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+app.delete('/api/admin/schedules/user/:user_id', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  const { user_id } = req.params;
+  try {
+    db.prepare('DELETE FROM work_schedules WHERE user_id = ?').run(user_id);
+    logInfo('Custom schedules deleted (restored to general)', { admin: req.user.email, user_id });
+    res.json({ success: true });
+  } catch (err) {
+    logError('Delete custom schedules error', { error: err.message });
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+app.get('/api/admin/fines', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  try {
+    const users = db.prepare('SELECT id FROM users').all();
+    for (const user of users) {
+      syncFinesForUser(user.id);
+    }
+    const rows = db.prepare(`
+      SELECT f.*, u.name, u.email 
+      FROM fines f 
+      JOIN users u ON f.user_id = u.id 
+      ORDER BY f.date DESC, f.created_at DESC
+    `).all();
+    res.json(rows);
+  } catch (err) {
+    logError('Admin query fines error', { error: err.message });
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+app.delete('/api/admin/fines/:id', authenticateToken, (req, res) => {
+  if (req.user.role !== 'admin') return res.sendStatus(403);
+  const { id } = req.params;
+  try {
+    const result = db.prepare('DELETE FROM fines WHERE id = ?').run(id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Fine not found' });
+    logInfo('Fine deleted/excused by admin', { fineId: id, admin: req.user.email });
+    res.json({ success: true });
+  } catch (err) {
+    logError('Delete fine error', { error: err.message });
+    res.status(500).json({ error: 'DB error' });
+  }
+});
+
+app.get('/api/attendance/my-fines', authenticateToken, (req, res) => {
+  try {
+    syncFinesForUser(req.user.id);
+    const rows = db.prepare('SELECT * FROM fines WHERE user_id = ? ORDER BY date DESC').all(req.user.id);
+    res.json(rows);
+  } catch (err) {
+    logError('My fines query error', { userId: req.user.id, error: err.message });
     res.status(500).json({ error: 'DB error' });
   }
 });
