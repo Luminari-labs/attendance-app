@@ -158,30 +158,19 @@ const toISO = (ts) => {
 };
 
 const getLocalDateString = (dateObj) => {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Guayaquil',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  });
-  const parts = formatter.formatToParts(dateObj);
-  const year = parts.find(p => p.type === 'year').value;
-  const month = parts.find(p => p.type === 'month').value;
-  const day = parts.find(p => p.type === 'day').value;
+  // America/Guayaquil is UTC-5 permanently
+  const localDate = new Date(dateObj.getTime() - 5 * 60 * 60 * 1000);
+  const year = localDate.getUTCFullYear();
+  const month = String(localDate.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(localDate.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
 
 const getLocalTimeString = (dateObj) => {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Guayaquil',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  });
-  const parts = formatter.formatToParts(dateObj);
-  let hour = parts.find(p => p.type === 'hour').value;
-  const minute = parts.find(p => p.type === 'minute').value;
-  if (hour === '24') hour = '00';
+  // America/Guayaquil is UTC-5 permanently
+  const localDate = new Date(dateObj.getTime() - 5 * 60 * 60 * 1000);
+  const hour = String(localDate.getUTCHours()).padStart(2, '0');
+  const minute = String(localDate.getUTCMinutes()).padStart(2, '0');
   return `${hour}:${minute}`;
 };
 
@@ -344,7 +333,11 @@ app.post('/api/admin/schedules', authenticateToken, (req, res) => {
   const { user_id, schedules } = req.body;
   if (!Array.isArray(schedules)) return res.status(400).json({ error: 'Schedules must be an array' });
   
-  const upsertStmt = db.prepare(`
+  const checkGeneralExists = db.prepare('SELECT id FROM work_schedules WHERE user_id IS NULL AND day_of_week = ?');
+  const updateGeneralStmt = db.prepare('UPDATE work_schedules SET start_time = ?, end_time = ?, is_workday = ? WHERE user_id IS NULL AND day_of_week = ?');
+  const insertGeneralStmt = db.prepare('INSERT INTO work_schedules (id, user_id, day_of_week, start_time, end_time, is_workday) VALUES (?, NULL, ?, ?, ?, ?)');
+
+  const upsertUserStmt = db.prepare(`
     INSERT INTO work_schedules (id, user_id, day_of_week, start_time, end_time, is_workday)
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(user_id, day_of_week) DO UPDATE SET
@@ -356,7 +349,16 @@ app.post('/api/admin/schedules', authenticateToken, (req, res) => {
   try {
     const runTransaction = db.transaction(() => {
       for (const s of schedules) {
-        upsertStmt.run(randomUUID(), user_id || null, s.day_of_week, s.start_time || null, s.end_time || null, s.is_workday);
+        if (user_id === null || user_id === undefined) {
+          const row = checkGeneralExists.get(s.day_of_week);
+          if (row) {
+            updateGeneralStmt.run(s.start_time || null, s.end_time || null, s.is_workday, s.day_of_week);
+          } else {
+            insertGeneralStmt.run(randomUUID(), s.day_of_week, s.start_time || null, s.end_time || null, s.is_workday);
+          }
+        } else {
+          upsertUserStmt.run(randomUUID(), user_id, s.day_of_week, s.start_time || null, s.end_time || null, s.is_workday);
+        }
       }
     });
     runTransaction();
@@ -392,6 +394,7 @@ app.get('/api/admin/fines', authenticateToken, (req, res) => {
       SELECT f.*, u.name, u.email 
       FROM fines f 
       JOIN users u ON f.user_id = u.id 
+      WHERE f.is_excused = 0
       ORDER BY f.date DESC, f.created_at DESC
     `).all();
     res.json(rows);
@@ -405,12 +408,12 @@ app.delete('/api/admin/fines/:id', authenticateToken, (req, res) => {
   if (req.user.role !== 'admin') return res.sendStatus(403);
   const { id } = req.params;
   try {
-    const result = db.prepare('DELETE FROM fines WHERE id = ?').run(id);
+    const result = db.prepare('UPDATE fines SET is_excused = 1 WHERE id = ?').run(id);
     if (result.changes === 0) return res.status(404).json({ error: 'Fine not found' });
-    logInfo('Fine deleted/excused by admin', { fineId: id, admin: req.user.email });
+    logInfo('Fine excused by admin', { fineId: id, admin: req.user.email });
     res.json({ success: true });
   } catch (err) {
-    logError('Delete fine error', { error: err.message });
+    logError('Excuse fine error', { error: err.message });
     res.status(500).json({ error: 'DB error' });
   }
 });
@@ -418,7 +421,7 @@ app.delete('/api/admin/fines/:id', authenticateToken, (req, res) => {
 app.get('/api/attendance/my-fines', authenticateToken, (req, res) => {
   try {
     syncFinesForUser(req.user.id);
-    const rows = db.prepare('SELECT * FROM fines WHERE user_id = ? ORDER BY date DESC').all(req.user.id);
+    const rows = db.prepare('SELECT * FROM fines WHERE user_id = ? AND is_excused = 0 ORDER BY date DESC').all(req.user.id);
     res.json(rows);
   } catch (err) {
     logError('My fines query error', { userId: req.user.id, error: err.message });

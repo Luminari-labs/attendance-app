@@ -104,6 +104,36 @@ try {
 } catch {
 }
 
+try {
+  db.exec('ALTER TABLE fines ADD COLUMN is_excused INTEGER DEFAULT 0');
+} catch {
+}
+
+// Clean up any duplicate general schedules if they exist
+const duplicateSchedules = db.prepare(`
+  SELECT day_of_week, COUNT(*) as count 
+  FROM work_schedules 
+  WHERE user_id IS NULL 
+  GROUP BY day_of_week 
+  HAVING count > 1
+`).all();
+
+if (duplicateSchedules.length > 0) {
+  console.log('[DB] Found duplicate general schedules, cleaning up...');
+  const deleteStmt = db.prepare('DELETE FROM work_schedules WHERE user_id IS NULL AND day_of_week = ?');
+  const insertStmt = db.prepare('INSERT INTO work_schedules (id, user_id, day_of_week, start_time, end_time, is_workday) VALUES (?, NULL, ?, ?, ?, ?)');
+  
+  for (const dup of duplicateSchedules) {
+    const latest = db.prepare('SELECT * FROM work_schedules WHERE user_id IS NULL AND day_of_week = ? ORDER BY rowid DESC LIMIT 1').get(dup.day_of_week);
+    if (latest) {
+      deleteStmt.run(dup.day_of_week);
+      const { randomUUID } = require('crypto');
+      insertStmt.run(randomUUID(), dup.day_of_week, latest.start_time, latest.end_time, latest.is_workday);
+    }
+  }
+  console.log('[DB] Duplicate general schedules cleaned up.');
+}
+
 const adminExists = db.prepare("SELECT id FROM users WHERE email = 'admin@luminari-labs.space'").get();
 if (!adminExists) {
   const bcrypt = require('bcryptjs');
