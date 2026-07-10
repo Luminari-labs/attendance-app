@@ -12,8 +12,8 @@ services:
       - QR_SECRET=${QR_SECRET}
       - FRONTEND_URL=${FRONTEND_URL}
     volumes:
-      - attendance_data:/app/data
+      - attendance-data:/app/data
     restart: unless-stopped
 
 volumes:
-  attendance_data:
+  attendance-data:
